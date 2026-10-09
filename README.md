@@ -195,16 +195,3 @@ the web app itself.
 | `sample_companies.xlsx` | A sample list (company name and number): 10 real companies, mostly importers, exporters and travel firms with foreign exchange exposure, plus two domestic businesses and a micro company for contrast |
 | `tests/` | The test suite and its fixtures |
 
-## Limits worth knowing
-
-- OCR can misread digits, which is why scanned-PDF figures are marked VERIFY.
-- Prior-year turnover from PDFs and untagged accounts is only given when the row is plainly
-  "this year, last year"; rows with extra columns (like "before adjusting items") leave it blank.
-- Cash and debtors from scanned PDFs come from OCR like the turnover, so check them against
-  the PDF too.
-- A keyword match means the words appear in the accounts, not that the company has that
-  exposure: "options" also matches "share options", and policy notes often mention foreign
-  currency in general terms. Treat the column as a pointer to where to read.
-- If the Companies House website changes its page layout, the company lookup may need updating.
-  The live tests (`RUN_LIVE=1`) will show it straight away.
-- This reads public filings. It doesn't replace checking the accounts for a decision that matters.
