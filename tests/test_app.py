@@ -117,3 +117,17 @@ def test_time_limit_box_defaults_to_no_limit_and_shows_in_estimate():
 def test_page_slider_defaults_to_no_limit():
     at = start()
     assert at.slider[0].label.startswith("Max pages per PDF") and at.slider[0].value == 0
+
+
+def test_a_run_leaves_the_queue_empty_afterwards(fake_ch):
+    from run_queue import QUEUE
+    at = upload(start(), "clients.csv", b"Company Number\n445790\n")
+    at.button[0].click().run()
+    assert at.session_state["result"]["final"] and QUEUE.status() == (0, 0)
+
+
+def test_busy_app_says_so_before_you_start(monkeypatch):
+    from run_queue import QUEUE
+    monkeypatch.setattr(QUEUE, "status", lambda: (3, 2))
+    at = upload(start(), "clients.csv", b"Company Number\n445790\n")
+    assert any("The app is busy: 3 runs in progress, 2 waiting" in c.value for c in at.caption)

@@ -138,6 +138,29 @@ Keep the browser tab open while it runs: switching tabs or windows is fine, but 
 the laptop sleeping or losing the connection ends the run. If a run is interrupted by changing a
 setting, the results finished so far can still be downloaded.
 
+## Many users at once
+
+Everyone using the app shares one server, and every Companies House request comes from that
+server's address. The Companies House website blocks an address (HTTP 403) when it sends too
+many requests at once; in testing, 8 users running at the same time (about 5 requests a second)
+triggered a block that lifted by itself within about 13 minutes. So the app shares the load:
+
+- **One pace for everyone:** the whole app makes about one request a second, however many people
+  are using it. If Companies House pushes back, every run pauses for a couple of minutes and the
+  pace slows down, then speeds back up gradually. A row only shows ERROR if the block lasts
+  through several retries.
+- **A queue:** up to 3 runs go at once. Anyone else sees their place ("You're 2nd in the queue")
+  and their run starts automatically when a place frees up. The page says when the app is busy
+  before you start.
+- **One scanned PDF page at a time:** reading scanned pages takes a lot of memory and CPU, so the
+  app reads one page at a time across all users; two users' scanned reports take turns.
+
+What that means in practice: the app handles about 12-15 small companies a minute in total,
+shared between everyone running at the time. A list of 10 small companies takes about a minute
+on its own, and longer when others are running too. For regular large lists, the official
+Companies House API (a free key, 600 requests per 5 minutes) would be faster and isn't subject
+to the website's blocking.
+
 ## Hosting it (free)
 
 1. Put this folder in a GitHub repository (it can be private).
@@ -175,7 +198,7 @@ accounts and text PDFs.
 
 ```bash
 pip install -r requirements.txt -r requirements-dev.txt
-python -m pytest                          # 224 offline tests, about 25 seconds
+python -m pytest                          # 235 offline tests, about 30 seconds
 RUN_LIVE=1 python -m pytest tests/test_live.py -v    # 10 checks against the real site, about 8 minutes
 ```
 
@@ -191,6 +214,7 @@ the web app itself.
 | `app.py` | The web page |
 | `turnover.py` | Finding companies, filings and turnover; writing the Excel results |
 | `inputs.py` | Reading uploaded spreadsheets and guessing the columns |
+| `run_queue.py` | The queue that shares the app between users |
 | `default_keywords.txt` | The keyword list the app starts with, one per line |
 | `sample_companies.xlsx` | A sample list (company name and number): 10 real companies, mostly importers, exporters and travel firms with foreign exchange exposure, plus two domestic businesses and a micro company for contrast |
 | `tests/` | The test suite and its fixtures |

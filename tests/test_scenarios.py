@@ -275,12 +275,24 @@ def test_gives_up_after_retries(no_sleep):
         raise AssertionError("expected SourceError")
 
 
-def test_404_is_none_and_403_is_refused(no_sleep):
+def test_404_is_none_and_other_4xx_is_refused(no_sleep):
     assert web_with([404]).get("/x") is None
     try:
-        web_with([403]).get("/x")
+        web_with([400]).get("/x")
     except t.SourceError as e:
         assert "refused" in str(e)
+    else:
+        raise AssertionError("expected SourceError")
+
+
+def test_403_block_pauses_retries_and_explains(no_sleep):
+    assert web_with([403, 200]).get("/x").content == b"ok"            # a short block clears
+    try:
+        web_with([403] * t.RETRIES).get("/x")
+    except t.SourceError as e:
+        assert "refusing requests from this server" in str(e) and "temporary block" in str(e)
+    else:
+        raise AssertionError("expected SourceError")
 
 
 @needs_ocr

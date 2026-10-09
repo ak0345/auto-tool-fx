@@ -24,6 +24,7 @@ Install:
 import argparse
 import re
 import sys
+import threading
 import time
 import traceback
 from urllib.parse import quote_plus
@@ -39,7 +40,9 @@ from openpyxl.utils import get_column_letter
 from rapidfuzz import fuzz
 
 BASE = "https://find-and-update.company-information.service.gov.uk"
-WEB_DELAY = 1.5           # seconds between requests, be polite to the website
+WEB_DELAY = 1.0           # seconds between requests for the whole app, shared by every user
+MAX_DELAY = 8.0           # the pace slows to at most this after Companies House pushes back
+COOL_DOWN = 120           # seconds everyone pauses after a refusal (HTTP 403) or rate limit (429)
 RETRIES = 4               # attempts per request for network errors and server errors
 MATCH_THRESHOLD = 90      # name similarity needed to accept a search result
 FILING_PAGES = 20         # pages of filing history (25 filings each) to look through
@@ -91,22 +94,50 @@ class SourceError(Exception):
 # ---------------------------------------------------------------- web access
 
 
-class Web:
+class Pace:
+    """One pace for every request the app makes, whichever user it's for. All the app's
+    requests come from the same server address, and the website blocks that address
+    (HTTP 403) when the total gets too high, so users take turns at a steady rate. When
+    Companies House pushes back, everyone pauses and the pace slows; it speeds back up
+    gradually while requests go through."""
+
     def __init__(self, delay=WEB_DELAY):
+        self.base = self.delay = delay
+        self.lock = threading.Lock()
+        self.next_at = 0.0
+
+    def wait_turn(self):
+        with self.lock:                          # one request at a time, in order
+            pause = self.next_at - time.monotonic()
+            if pause > 0:
+                time.sleep(pause)
+            self.next_at = time.monotonic() + self.delay
+
+    def pushed_back(self, cool_down):
+        with self.lock:
+            self.delay = min(max(self.delay * 2, 2.0), MAX_DELAY)
+            self.next_at = max(self.next_at, time.monotonic() + cool_down)
+
+    def went_through(self):
+        self.delay = max(self.base, self.delay * 0.98)
+
+
+PACE = Pace()                                    # shared by every Web() in this process
+
+
+class Web:
+    def __init__(self, delay=None, pace=None):
         self.s = requests.Session()
         self.s.headers["User-Agent"] = "Mozilla/5.0 (Automation Tool)"
-        self.delay = delay
-        self._last = 0.0
+        self.pace = pace or (Pace(delay) if delay is not None else PACE)
 
     def get(self, path, params=None):
-        """GET a page; None for 404. Retries network errors, server errors and rate limits."""
+        """GET a page; None for 404. Retries network errors, server errors, rate limits and
+        temporary refusals, pausing the whole app's requests when Companies House pushes back."""
         url = path if path.startswith("http") else BASE + path
         problem = ""
         for attempt in range(RETRIES):
-            wait = self.delay - (time.time() - self._last)
-            if wait > 0:
-                time.sleep(wait)
-            self._last = time.time()
+            self.pace.wait_turn()
             try:
                 r = self.s.get(url, params=params, timeout=60)
             except requests.RequestException as e:
@@ -114,10 +145,13 @@ class Web:
                 time.sleep(5 * (attempt + 1))
                 continue
             if r.status_code == 404:
+                self.pace.went_through()
                 return None
-            if r.status_code == 429:
-                problem = "rate limited by Companies House"
-                time.sleep(45 * (attempt + 1))
+            if r.status_code in (403, 429):
+                problem = ("Companies House is refusing requests from this server (HTTP 403), usually a "
+                           "temporary block after heavy use" if r.status_code == 403
+                           else "rate limited by Companies House")
+                self.pace.pushed_back(COOL_DOWN * (attempt + 1))
                 continue
             if r.status_code >= 500:
                 problem = f"Companies House server error (HTTP {r.status_code})"
@@ -125,6 +159,7 @@ class Web:
                 continue
             if r.status_code >= 400:
                 raise SourceError(f"Companies House refused the request (HTTP {r.status_code})")
+            self.pace.went_through()
             return r
         raise SourceError(f"{problem}, tried {RETRIES} times; run this row again later")
 
@@ -634,6 +669,16 @@ def ixbrl_text(soup):
 # ---------------------------------------------------------------- PDF + OCR
 
 _ocr = None
+OCR_SLOTS = threading.BoundedSemaphore(1)   # scanned pages are read one at a time across all users
+
+
+def ocr_turn(progress=None):
+    """Wait for the scanned-PDF reader. Reading uses a lot of memory and CPU, so the app reads
+    one page at a time; two users' reports take turns page by page."""
+    if not OCR_SLOTS.acquire(blocking=False):
+        if progress:
+            progress("waiting for the scanned-PDF reader (another user's report is being read)")
+        OCR_SLOTS.acquire()
 
 
 class OcrUnavailable(Exception):
@@ -804,6 +849,7 @@ def read_pdf(data, max_pages=None, progress=None, read_scanned=True, keywords=No
                 progress(f"{what}, page {done} of {len(order)}")
             if want_keywords and not ocr_keywords:
                 want_keywords, out.keyword_ocr_skipped = False, True
+            ocr_turn(progress)
             try:
                 image = page.render(scale=150 / 72).to_pil()
                 if want_keywords:                          # need every word on the page
@@ -824,6 +870,8 @@ def read_pdf(data, max_pages=None, progress=None, read_scanned=True, keywords=No
                 out.problem = ("this is a scanned PDF and the scanned-PDF reader isn't installed on this "
                                "server, open the PDF to check")
                 return out
+            finally:
+                OCR_SLOTS.release()
         heading = [r for r in rows if r.strip()]
         if need_turnover and is_statement_page(heading):
             found = turnover_from_lines(rows)

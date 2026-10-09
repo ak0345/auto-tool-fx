@@ -15,6 +15,7 @@ import streamlit as st
 
 import turnover
 from inputs import NONE, guess, guess_header_row, read_upload
+from run_queue import QUEUE
 
 HERE = Path(__file__).parent
 SECONDS_PER_COMPANY = 5
@@ -169,6 +170,10 @@ def table_row(name, res):
             "Matched": turnover.keyword_count(res), "Keywords": turnover.keyword_cell(res) or "", "Notes": res.note}
 
 
+def ordinal(n):
+    return f"{n}{'th' if 10 <= n % 100 <= 20 else {1: 'st', 2: 'nd', 3: 'rd'}.get(n % 10, 'th')}"
+
+
 def mentions_keywords(row):
     return bool(row["Keywords"]) and row["Keywords"] != "none found"
 
@@ -269,7 +274,25 @@ st.caption(f"{n_rows} companies{f', searching for {len(keywords)} keywords' if k
               if read_scanned else ".")
            + " Keep this tab open while it runs.")
 
+running, waiting = QUEUE.status()
+if running >= QUEUE.max_active:
+    st.caption(f"The app is busy: {running} runs in progress" + (f", {waiting} waiting" if waiting else "")
+               + ". You can still start; your run will wait its turn.")
+
 if st.button("Find turnover", type="primary", width="stretch", disabled=n_rows == 0):
+    ticket = QUEUE.join()
+    queue_note = st.empty()
+
+    def show_place(place, active):
+        queue_note.info(f"⏳ You're {ordinal(place)} in the queue. {active} run{'s are' if active != 1 else ' is'} "
+                        "in progress; yours starts automatically. Keep this tab open.")
+
+    try:
+        QUEUE.wait_turn(ticket, on_wait=show_place)
+    except BaseException:
+        QUEUE.leave(ticket)                          # left the page while waiting
+        raise
+    queue_note.empty()
     _wb, values = read_upload(data, upload.name)
     ws_values = values[sheet]
     cols = {k: turnover.find_col(ws_values, picked.get(k), header_row) for k in ("name", "number")}
@@ -313,10 +336,13 @@ if st.button("Find turnover", type="primary", width="stretch", disabled=n_rows =
                                     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                                     on_click="ignore", width="stretch", key=f"partial-{done}")
 
-    turnover.process_sheet(ws_values, cols, out_ws, time_limit=time_limit, max_pages=max_pages or None,
-                           on_row=on_row, header_row=header_row, read_scanned=read_scanned, keywords=keywords or None,
-                           ocr_keywords=ocr_keywords,
-                           on_detail=lambda msg: activity.caption(f"⏳ {msg}"))
+    try:
+        turnover.process_sheet(ws_values, cols, out_ws, time_limit=time_limit, max_pages=max_pages or None,
+                               on_row=on_row, header_row=header_row, read_scanned=read_scanned,
+                               keywords=keywords or None, ocr_keywords=ocr_keywords,
+                               on_detail=lambda msg: activity.caption(f"⏳ {msg}"))
+    finally:
+        QUEUE.leave(ticket)                          # finished, stopped or left: next in line goes
     save(len(seen), final=True)
     bar.empty()
     partial.empty()
