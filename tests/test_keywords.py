@@ -197,36 +197,38 @@ def sheet(rows):
         wb.active.append(r)
     buf = io.BytesIO()
     wb.save(buf)
-    return read_upload(buf.getvalue(), "c.xlsx")
+    return read_upload(buf.getvalue(), "c.xlsx")[1].active
 
 
-def test_keywords_column_and_summary():
-    wb, values = sheet([["Company No"], ["00445790"], ["16900000"]])
+def test_keywords_columns_and_summary():
+    src = sheet([["Company No"], ["00445790"], ["16900000"]])
     routes = company("00445790", filings=TAGGED, xhtml=fixture("ixbrl_tagged.html", "rb"))
     routes.update(company("16900000", profile="profile_new.html"))
-    counts = t.process_sheet(wb.active, {"name": None, "number": 1}, web=FakeWeb(routes),
-                             values_ws=values.active, keywords=DEFAULTS)
-    heads = [c.value for c in wb.active[1]]
-    at = heads.index("Keywords Found")
-    assert heads[at - 2:at + 2] == ["Accounts Period End", "Keyword Count", "Keywords Found", "Notes"]
-    assert wb.active.cell(2, at).value == 3          # the filing says "financial risks", not "financial risk"
-    assert wb.active.cell(2, at + 1).value == "derivative (1), presentation currency (1), " \
-                                             "derivative financial instruments (1)"
-    assert wb.active.cell(3, at).value is None and wb.active.cell(3, at + 1).value is None   # nothing to search
+    out_wb, out = t.new_output()
+    counts = t.process_sheet(src, {"name": None, "number": 1}, out, web=FakeWeb(routes), keywords=DEFAULTS)
+    heads = [c.value for c in out[1]]
+    count_col, found_col = heads.index("Keyword Count") + 1, heads.index("Keywords Found") + 1
+    assert out.cell(2, count_col).value == 3          # the filing says "financial risks", not "financial risk"
+    assert out.cell(2, found_col).value == "derivative (1), presentation currency (1), " \
+                                           "derivative financial instruments (1)"
+    assert out.cell(3, count_col).value is None and out.cell(3, found_col).value is None   # nothing to search
     assert counts["_with_keywords"] == 1
 
-    t.add_summary(wb, counts, "c.xlsx", DEFAULTS)
-    summary = wb["Turnover Summary"]
+    t.add_summary(out_wb, counts, "c.xlsx", DEFAULTS)
+    summary = out_wb["Summary"]
     cells = [c.value for row in summary.iter_rows() for c in row if c.value is not None]
     assert "Keywords" in cells and any(str(v).startswith("Searched for 162: foreign exchange") for v in cells)
     assert summary.cell(12, 1).value == "Total" and summary.cell(12, 2).value == 2   # statuses only
 
 
-def test_no_keywords_no_column():
-    wb, values = sheet([["Company No"], ["00445790"]])
+def test_no_keywords_leaves_keyword_columns_blank():
+    src = sheet([["Company No"], ["00445790"]])
     routes = company("00445790", filings=TAGGED, xhtml=fixture("ixbrl_tagged.html", "rb"))
-    t.process_sheet(wb.active, {"name": None, "number": 1}, web=FakeWeb(routes), values_ws=values.active)
-    assert "Keywords Found" not in [c.value for c in wb.active[1]]
+    _wb, out = t.new_output()
+    t.process_sheet(src, {"name": None, "number": 1}, out, web=FakeWeb(routes))
+    heads = [c.value for c in out[1]]
+    assert out.cell(2, heads.index("Keyword Count") + 1).value is None
+    assert out.cell(2, heads.index("Keywords Found") + 1).value is None
 
 
 # ---------------------------------------------------------------- time limit

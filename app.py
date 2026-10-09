@@ -116,8 +116,8 @@ def hero():
   <div>
     <div class="eyebrow">Companies House accounts</div>
     <h1><span class="grad">Automation</span> Tool</h1>
-    <p class="lede">Upload a list of UK companies. Get back each one's turnover from its latest accounts
-      at Companies House, and which of your keywords those accounts mention.</p>
+    <p class="lede">Upload a list of UK companies. Get back each one's turnover, cash, debtors and people
+      with significant control from Companies House, and which of your keywords their accounts mention.</p>
     <div class="trust">
       <span>{ICONS["doc"]}Companies House data</span>
       <span>{ICONS["check"]}Exact tagged figures</span>
@@ -135,9 +135,11 @@ def preview(ws, header_row, rows=5):
     return pd.DataFrame([(d + [None] * width)[:width] for d in data], columns=heads).astype(str).replace("None", "")
 
 
+TABLE_ORDER = ["Company", "Status", "Turnover", "Cash", "Debtors", "PSC", "Matched", "Keywords", "Notes"]
+
+
 def results_frame(rows):
-    df = pd.DataFrame(rows, columns=["Company", "Status", "Turnover", "Period end", "Keywords", "Notes", "Matched"])
-    df = df[["Company", "Status", "Turnover", "Period end", "Matched", "Keywords", "Notes"]]
+    df = pd.DataFrame(rows, columns=TABLE_ORDER)
     return df.style.apply(lambda col: [f"background-color:{STATUS_COLOURS.get(v, ('#161024', '#fff'))[0]};"
                                        f"color:{STATUS_COLOURS.get(v, ('#161024', '#fff'))[1]};font-weight:600"
                                        for v in col], subset=["Status"])
@@ -146,17 +148,29 @@ def results_frame(rows):
 TABLE_COLUMNS = {"Company": st.column_config.TextColumn(width="medium"),
                  "Status": st.column_config.TextColumn(width="medium"),
                  "Turnover": st.column_config.TextColumn(width="medium"),
-                 "Period end": st.column_config.TextColumn(width="small"),
+                 "Cash": st.column_config.TextColumn(width="small"),
+                 "Debtors": st.column_config.TextColumn(width="small"),
+                 "PSC": st.column_config.TextColumn(width="medium", help="Persons with significant control"),
                  "Matched": st.column_config.NumberColumn(width="small", help="Different keywords found"),
                  "Keywords": st.column_config.TextColumn(width="large"),
                  "Notes": st.column_config.TextColumn(width="large")}
 
 
-def money(res):
-    if res.turnover is None:
+def money(res, value):
+    if value is None:
         return ""
-    symbol = {"GBP": "£", "EUR": "€", "USD": "$"}.get(res.currency, "")
-    return f"{symbol}{res.turnover:,.0f}" + ("" if symbol or not res.currency else f" {res.currency}")
+    symbol = {"GBP": "£", "EUR": "€", "USD": "$", "": "£"}.get(res.currency, "")
+    return f"{symbol}{value:,.0f}" + ("" if symbol else f" {res.currency}")
+
+
+def table_row(name, res):
+    return {"Company": res.company_name or name, "Status": res.status, "Turnover": money(res, res.turnover),
+            "Cash": money(res, res.cash), "Debtors": money(res, res.debtors), "PSC": turnover.psc_cell(res) or "",
+            "Matched": turnover.keyword_count(res), "Keywords": turnover.keyword_cell(res) or "", "Notes": res.note}
+
+
+def mentions_keywords(row):
+    return bool(row["Keywords"]) and row["Keywords"] != "none found"
 
 
 # ---------------------------------------------------------------- page
@@ -256,57 +270,63 @@ st.caption(f"{n_rows} companies{f', searching for {len(keywords)} keywords' if k
            + " Keep this tab open while it runs.")
 
 if st.button("Find turnover", type="primary", width="stretch", disabled=n_rows == 0):
-    wb, values = read_upload(data, upload.name)        # fresh copy so a re-run doesn't stack columns
-    ws, ws_values = wb[sheet], values[sheet]
+    _wb, values = read_upload(data, upload.name)
+    ws_values = values[sheet]
     cols = {k: turnover.find_col(ws_values, picked.get(k), header_row) for k in ("name", "number")}
-    out_name = re.sub(r"\.(xlsx|xlsm|xls|csv)$", "", upload.name, flags=re.I) + "_turnover.xlsx"
+    out_wb, out_ws = turnover.new_output()
+    out_name = re.sub(r"\.(xlsx|xlsm|xls|csv)$", "", upload.name, flags=re.I) + "_results.xlsx"
     st.session_state.pop("result", None)
 
     bar = st.progress(0.0, text="Starting...")
     activity = st.empty()
+    partial = st.empty()
     table = st.empty()
     seen = []
 
     def save(done, final=False):
         if final:
-            turnover.add_summary(wb, counts_so_far(), upload.name, keywords)
+            turnover.add_summary(out_wb, counts_so_far(), upload.name, keywords)
         buf = io.BytesIO()
-        wb.save(buf)
+        out_wb.save(buf)
         st.session_state["result"] = {"bytes": buf.getvalue(), "name": out_name, "rows": list(seen),
                                       "done": done, "total": n_rows, "final": final}
 
     def counts_so_far():
         c = {}
         for r in seen:
-            c[r[1]] = c.get(r[1], 0) + 1
-            if r[4] and r[4] != "none found":
+            c[r["Status"]] = c.get(r["Status"], 0) + 1
+            if mentions_keywords(r):
                 c["_with_keywords"] = c.get("_with_keywords", 0) + 1
         return c
 
     def on_row(done, total, name, res):
         bar.progress(min(done / max(total, 1), 1.0), text=f"Checked {done} of {total}")
-        seen.append([res.company_name or name, res.status, money(res), res.period_end,
-                     turnover.keyword_cell(res) or "", res.note, turnover.keyword_count(res)])
+        seen.append(table_row(name, res))
         table.dataframe(results_frame(seen[-12:]), hide_index=True, width="stretch",
                         column_config=TABLE_COLUMNS)
         activity.empty()
-        if done % 5 == 0:
+        if done % 5 == 0 and done < total:
             save(done)                                   # partial results survive an interruption
+            # Downloading these doesn't rerun the app, so the run carries on.
+            partial.download_button(f"⬇  Download the {done} done so far (Excel)", st.session_state["result"]["bytes"],
+                                    file_name=out_name.replace("_results.xlsx", f"_first_{done}.xlsx"),
+                                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                                    on_click="ignore", width="stretch", key=f"partial-{done}")
 
-    turnover.process_sheet(ws, cols, time_limit=time_limit, max_pages=max_pages or None, on_row=on_row,
-                           header_row=header_row,
-                           values_ws=ws_values, read_scanned=read_scanned, keywords=keywords or None,
+    turnover.process_sheet(ws_values, cols, out_ws, time_limit=time_limit, max_pages=max_pages or None,
+                           on_row=on_row, header_row=header_row, read_scanned=read_scanned, keywords=keywords or None,
                            ocr_keywords=ocr_keywords,
                            on_detail=lambda msg: activity.caption(f"⏳ {msg}"))
     save(len(seen), final=True)
     bar.empty()
+    partial.empty()
     table.empty()
 
 res = st.session_state.get("result")
 if res:
     counts = {}
     for r in res["rows"]:
-        counts[r[1]] = counts.get(r[1], 0) + 1
+        counts[r["Status"]] = counts.get(r["Status"], 0) + 1
     if not res["final"]:
         st.warning(f"The last run stopped after {res['done']} of {res['total']} companies. "
                    "You can download what was finished, or run it again.")
@@ -320,8 +340,9 @@ if res:
                        type="primary", width="stretch")
     st.dataframe(results_frame(res["rows"]), hide_index=True, width="stretch",
                  height=min(38 + 35 * len(res["rows"]), 420), column_config=TABLE_COLUMNS)
-    with_kw = sum(1 for r in res["rows"] if r[4] and r[4] != "none found")
-    st.caption("The Excel file keeps your original columns, adds the results with links to each PDF and "
-               "company page, and has a Turnover Summary sheet."
+    with_kw = sum(1 for r in res["rows"] if mentions_keywords(r))
+    st.caption("The Excel file has one row per company: turnover, prior year, cash, debtors, persons with "
+               "significant control, a LinkedIn search link, keywords, and links to each PDF and company page, "
+               "plus a Summary sheet."
                + (f" {with_kw} of {len(res['rows'])} companies mention at least one keyword."
-                  if any(r[4] for r in res["rows"]) else ""))
+                  if any(r["Keywords"] for r in res["rows"]) else ""))

@@ -73,75 +73,77 @@ def test_column_guessing():
 
 # ---------------------------------------------------------------- writing results
 
+EXPECTED_HEADERS = ["Company Name", "Company Number", "Turnover Status", 'Turnover or "Revenue"',
+                    'Prior Year "Turnover" or "Revenue"', "Cash", "Debtors", "Persons with significant control",
+                    "linkedin search", "Keyword Count", "Keywords Found", "Notes", "Latest Accounts",
+                    "Accounts PDF", "Companies House Page"]
+
+
+def test_output_has_exactly_the_requested_columns():
+    _wb, out = t.new_output()
+    assert [c.value for c in out[1]] == EXPECTED_HEADERS
+    assert out["A1"].fill.fgColor.rgb.endswith("7030A0") and out.freeze_panes == "A2"
+
 
 def test_process_sheet_end_to_end():
     data = xlsx_bytes([["Company Name", "Company No", "Owner"],
-                       ["Tesco PLC", 445790.0, "=\"A\"&\"B\""],        # float number, formula
+                       ["Tesco PLC", 445790.0, "=\"A\"&\"B\""],      # float number, formula
                        [None, None, "just a note"],                   # blank company: skipped
                        ["Tesco PLC", "00445790", "dupe"],             # duplicate: looked up once
-                       ["", "99999999", ""]],                         # unknown number
+                       ["Nobody Ltd", "99999999", ""]],               # unknown number
                       title_rows=[["Client list"], []])
-    wb, values = read_upload(data, "c.xlsx")
+    _wb, values = read_upload(data, "c.xlsx")
+    src = values.active
     routes = company("00445790", filings=TAGGED, xhtml=fixture("ixbrl_tagged.html", "rb"))
     web = FakeWeb(routes)
     seen = []
-    cols = {"name": t.find_col(values.active, "Company Name", 3), "number": t.find_col(values.active, "Company No", 3)}
-    counts = t.process_sheet(wb.active, cols, web=web, header_row=3, values_ws=values.active,
+    cols = {"name": t.find_col(src, "Company Name", 3), "number": t.find_col(src, "Company No", 3)}
+    out_wb, out = t.new_output()
+    counts = t.process_sheet(src, cols, out, web=web, header_row=3,
                              on_row=lambda i, n, name, res: seen.append((i, n, res.status)))
     assert counts == {"FOUND": 2, "NOT FOUND": 1}
     assert [s[:2] for s in seen] == [(1, 3), (2, 3), (3, 3)]
     assert web.calls.count("/company/00445790") == 1                  # cached
 
-    ws = wb.active
-    heads = [c.value for c in ws[3]]
-    assert heads[:3] == ["Company Name", "Company No", "Owner"] and heads[3] == "Turnover Status"
-    col = {h: i + 1 for i, h in enumerate(heads)}
-    assert ws.cell(4, col["Turnover"]).value == 44_043_650
-    assert ws.cell(4, col["Turnover"]).number_format == t.MONEY
-    assert ws.cell(4, col["Accounts PDF"]).hyperlink.target.endswith("format=pdf&download=0")
-    assert ws.cell(4, col["Companies House Page"]).hyperlink.target.endswith("/company/00445790")
-    assert ws.cell(4, col["Turnover Status"]).fill.fgColor.rgb.endswith(t.FILL_COLOURS["FOUND"])
-    assert ws.cell(5, col["Turnover Status"]).value is None                # blank row untouched
-    assert ws.cell(7, col["Turnover Status"]).value == "NOT FOUND"
-    assert ws["C4"].value == '="A"&"B"'                                    # formula kept
-    assert ws.freeze_panes == "A4" and ws.auto_filter.ref.startswith("A3:")
+    col = {h: i + 1 for i, h in enumerate(EXPECTED_HEADERS)}
+    assert out.max_row == 4                                            # one row per company, no blanks
+    assert out.cell(2, col["Company Name"]).value == "TESCO PLC"       # the registered name
+    assert out.cell(2, col["Company Number"]).value == "00445790"
+    assert out.cell(2, col['Turnover or "Revenue"']).value == 44_043_650
+    assert out.cell(2, col['Prior Year "Turnover" or "Revenue"']).value == 47_988_261
+    assert out.cell(2, col['Turnover or "Revenue"']).number_format == t.MONEY
+    assert out.cell(2, col["Accounts PDF"]).hyperlink.target.endswith("format=pdf&download=0")
+    assert out.cell(2, col["Companies House Page"]).hyperlink.target.endswith("/company/00445790")
+    assert out.cell(2, col["Turnover Status"]).fill.fgColor.rgb.endswith(t.FILL_COLOURS["FOUND"])
+    assert out.cell(4, col["Company Name"]).value == "Nobody Ltd"      # not found: what was typed
+    assert out.cell(4, col["Company Number"]).value == "99999999"
+    assert out.cell(4, col["Turnover Status"]).value == "NOT FOUND"
+    assert out.auto_filter.ref == "A1:O4"
 
-    t.add_summary(wb, counts, "c.xlsx")
-    summary = wb["Turnover Summary"]
+    t.add_summary(out_wb, counts, "c.xlsx")
+    summary = out_wb["Summary"]
     rows = {summary.cell(r, 1).value: summary.cell(r, 2).value for r in range(6, 14)}
     assert rows["FOUND"] == 2 and rows["NOT FOUND"] == 1 and rows["Total"] == 3
 
     buf = io.BytesIO()
-    wb.save(buf)                                                           # saves and reopens cleanly
-    assert load_workbook(io.BytesIO(buf.getvalue()))["Turnover Summary"]["A1"].value == "Automation Tool results"
-
-
-def test_running_twice_reuses_the_result_columns():
-    data = xlsx_bytes([["Company No"], ["00445790"]])
-    wb, values = read_upload(data, "c.xlsx")
-    routes = company("00445790", filings=MICRO, xhtml=fixture("ixbrl_micro.html", "rb"))
-    for _ in range(2):
-        t.process_sheet(wb.active, {"name": None, "number": 1}, web=FakeWeb(routes), values_ws=values.active)
-        t.add_summary(wb, {"NOT DISCLOSED": 1})
-    heads = [c.value for c in wb.active[1]]
-    assert heads.count("Turnover Status") == 1 and wb.sheetnames.count("Turnover Summary") == 1
+    out_wb.save(buf)                                                   # saves and reopens cleanly
+    assert load_workbook(io.BytesIO(buf.getvalue()))["Summary"]["A1"].value == "Automation Tool results"
 
 
 def test_error_rows_dont_stop_the_run():
-    data = xlsx_bytes([["Company No"], ["00000001"], ["00445790"]])
-    wb, values = read_upload(data, "c.xlsx")
+    _wb, values = read_upload(xlsx_bytes([["Company No"], ["00000001"], ["00445790"]]), "c.xlsx")
     routes = company("00445790", filings=MICRO, xhtml=fixture("ixbrl_micro.html", "rb"))
     routes["/company/00000001"] = RuntimeError("boom")
-    counts = t.process_sheet(wb.active, {"name": None, "number": 1}, web=FakeWeb(routes), values_ws=values.active)
+    _out_wb, out = t.new_output()
+    counts = t.process_sheet(values.active, {"name": None, "number": 1}, out, web=FakeWeb(routes))
     assert counts == {"ERROR": 1, "NOT DISCLOSED": 1}
 
 
 def test_checkpoint_called_every_ten_rows():
-    data = xlsx_bytes([["Company No"]] + [["99999999"]] * 25)
-    wb, values = read_upload(data, "c.xlsx")
+    _wb, values = read_upload(xlsx_bytes([["Company No"]] + [["99999999"]] * 25), "c.xlsx")
     calls = []
-    t.process_sheet(wb.active, {"name": None, "number": 1}, web=FakeWeb({}), values_ws=values.active,
-                    checkpoint=lambda: calls.append(1))
+    _out_wb, out = t.new_output()
+    t.process_sheet(values.active, {"name": None, "number": 1}, out, web=FakeWeb({}), checkpoint=lambda: calls.append(1))
     assert len(calls) == 2
 
 

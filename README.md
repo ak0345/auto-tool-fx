@@ -1,9 +1,10 @@
 # Automation Tool
 
-Upload a spreadsheet of UK companies and get back each company's turnover from its latest
-annual accounts at Companies House, as an Excel file. It can also search the same accounts for a
-list of keywords (foreign exchange, hedging, exports...) and list the ones each company mentions.
-Nothing to install for the people using it, and no API key needed.
+Upload a spreadsheet of UK companies and get back, for each one, its turnover (or revenue),
+prior-year turnover, cash and debtors from its latest annual accounts at Companies House, its
+persons with significant control and a ready-made LinkedIn search, as an Excel file. It can also
+search the same accounts for a list of keywords (foreign exchange, hedging, exports...) and count
+how often each appears. Nothing to install for the people using it, and no API key needed.
 
 ## Using it
 
@@ -15,9 +16,28 @@ Nothing to install for the people using it, and no API key needed.
    derivatives, overseas operations and so on). Edit it, paste your own (one per line), or clear
    it to look up turnover only.
 3. Check that the app picked the right columns (it shows a preview), then press **Find turnover**.
-4. Download the results. Your original columns are kept; the results are added on the right,
-   with a link to each company's accounts PDF and Companies House page, and a
-   **Turnover Summary** sheet.
+4. Download the results: one row per company, with a **Summary** sheet.
+
+## The results file
+
+| Column | What it holds |
+|---|---|
+| Company Name, Company Number | As registered at Companies House (or as typed, if the company wasn't found) |
+| Turnover Status | See below |
+| Turnover or "Revenue" | This year's figure, whichever word the accounts use ("sales" counts too) |
+| Prior Year "Turnover" or "Revenue" | Last year's figure, when the accounts make it unambiguous |
+| Cash | Cash at bank and in hand (or cash and cash equivalents) at the balance sheet date |
+| Debtors | Total debtors (or trade and other receivables) at the balance sheet date |
+| Persons with significant control | The active PSCs, separated by semicolons; "none registered" if there are none |
+| linkedin search | A link to a Google search for the company, its first individual PSC and "LinkedIn" |
+| Keyword Count, Keywords Found | How many different keywords the accounts mention, and each one with its count |
+| Notes | Anything worth knowing about the row (see below) |
+| Latest Accounts | The accounts the figures came from, e.g. "Group of companies' accounts made up to 31 March 2025" |
+| Accounts PDF, Companies House Page | Links |
+
+Money columns use a £ accounting format. Small companies that don't file their turnover still
+usually show cash and debtors on their balance sheet, so those columns are filled more often
+than turnover.
 
 ## What the results mean
 
@@ -32,7 +52,8 @@ Nothing to install for the people using it, and no API key needed.
 
 The Notes column also flags: dissolved companies or ones in liquidation, accounts overdue at
 Companies House, accounts more than 2 years old, accounts covering more or less than a year,
-names that matched several companies, and a company number that belongs to a different name.
+accounts in a currency other than sterling, figures read by OCR (with the page), names that
+matched several companies, and a company number that belongs to a different name.
 
 **Expect a lot of NOT DISCLOSED.** UK small and micro companies are allowed to leave the profit
 and loss account out of the accounts they file, and most do. In one day of real filings, only
@@ -68,15 +89,18 @@ no document to search (for example a new company with no accounts yet).
 
 ## How it works
 
-For each company it looks up the company page, finds the latest annual accounts in the filing
-history (skipping interim accounts), and reads them, best source first:
+For each company it looks up the company page and its persons with significant control, finds
+the latest annual accounts in the filing history (skipping interim accounts), and reads them,
+best source first:
 
-1. **Electronic accounts (iXBRL):** the turnover figure is tagged, so it's exact. For group
-   accounts it takes the consolidated figure.
-2. **Untagged tables** in electronic accounts, read as text.
+1. **Electronic accounts (iXBRL):** turnover, cash and debtors are tagged, so they're exact.
+   For group accounts it takes the consolidated figures.
+2. **Untagged figures** in electronic accounts, read as text from the income statement and
+   balance sheet. This includes filings converted from PDF, where every word is placed by its
+   position on the page; those rows are rebuilt line by line.
 3. **The PDF:** text PDFs are read directly; scanned PDFs are read with OCR. It finds the
-   income statement page (skipping notes to the accounts), works out the units (£, £000, £m)
-   from the column headings, and spots non-sterling accounts.
+   income statement and balance sheet pages (skipping notes to the accounts), works out the
+   units (£, £000, £m) from the column headings, and spots non-sterling accounts.
 
 Every step has a fallback. If the electronic version won't download it reads the PDF, if a
 full set of accounts has no tagged turnover it reads the PDF, network errors and Companies House
@@ -107,8 +131,12 @@ By default there are no limits: every page of every PDF is read. Sidebar setting
 Whenever a limit stops the reading early, the row says how many pages were read, and a turnover
 that wasn't reached in time is marked CHECK PDF rather than NOT DISCLOSED.
 
-Keep the browser tab open while it runs. If a run is interrupted, the results finished so far
-(saved every 5 companies) can still be downloaded.
+While a run is going, a **Download the N done so far** button appears (updated every 5
+companies). Clicking it downloads the finished rows without stopping the run.
+
+Keep the browser tab open while it runs: switching tabs or windows is fine, but closing the tab,
+the laptop sleeping or losing the connection ends the run. If a run is interrupted by changing a
+setting, the results finished so far can still be downloaded.
 
 ## Hosting it (free)
 
@@ -147,7 +175,7 @@ accounts and text PDFs.
 
 ```bash
 pip install -r requirements.txt -r requirements-dev.txt
-python -m pytest                          # 179 offline tests, about 25 seconds
+python -m pytest                          # 224 offline tests, about 25 seconds
 RUN_LIVE=1 python -m pytest tests/test_live.py -v    # 10 checks against the real site, about 8 minutes
 ```
 
@@ -170,7 +198,10 @@ the web app itself.
 ## Limits worth knowing
 
 - OCR can misread digits, which is why scanned-PDF figures are marked VERIFY.
-- Prior-year turnover is only given when it's tagged in electronic accounts.
+- Prior-year turnover from PDFs and untagged accounts is only given when the row is plainly
+  "this year, last year"; rows with extra columns (like "before adjusting items") leave it blank.
+- Cash and debtors from scanned PDFs come from OCR like the turnover, so check them against
+  the PDF too.
 - A keyword match means the words appear in the accounts, not that the company has that
   exposure: "options" also matches "share options", and policy notes often mention foreign
   currency in general terms. Treat the column as a pointer to where to read.

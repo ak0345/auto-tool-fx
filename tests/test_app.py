@@ -47,10 +47,10 @@ def test_upload_guess_columns_run_and_get_results(fake_ch):
     at.button[0].click().run()
     assert not at.exception
     res = at.session_state["result"]
-    assert res["final"] and res["done"] == 2 and res["name"] == "clients_turnover.xlsx"
-    statuses = [r[1] for r in res["rows"]]
+    assert res["final"] and res["done"] == 2 and res["name"] == "clients_results.xlsx"
+    statuses = [r["Status"] for r in res["rows"]]
     assert statuses == ["FOUND", "NOT FOUND"]
-    assert res["rows"][0][2] == "£44,043,650"
+    assert res["rows"][0]["Turnover"] == "£44,043,650"
     assert res["bytes"][:2] == b"PK"                          # a real xlsx (zip) file
 
 
@@ -86,7 +86,8 @@ def test_run_with_keywords_lists_them_per_company(fake_ch):
     assert any("searching for 162 keywords" in c.value for c in at.caption)
     at.button[0].click().run()
     row = at.session_state["result"]["rows"][0]
-    assert row[1] == "FOUND" and row[4].startswith("derivative (1), presentation currency (1)") and row[6] == 3
+    assert row["Status"] == "FOUND" and row["Keywords"].startswith("derivative (1), presentation currency (1)")
+    assert row["Matched"] == 3
 
 
 def test_clearing_the_box_skips_the_search(fake_ch):
@@ -95,7 +96,7 @@ def test_clearing_the_box_skips_the_search(fake_ch):
     assert any("only turnover will be looked up" in c.value for c in at.caption)
     upload(at, "clients.csv", b"Company Number\n445790\n")
     at.button[0].click().run()
-    assert at.session_state["result"]["rows"][0][4] == ""
+    assert at.session_state["result"]["rows"][0]["Keywords"] == ""
 
 
 def test_long_keyword_search_is_warned_about():

@@ -281,3 +281,10 @@ def test_404_is_none_and_403_is_refused(no_sleep):
         web_with([403]).get("/x")
     except t.SourceError as e:
         assert "refused" in str(e)
+
+
+@needs_ocr
+def test_scanned_page_without_currency_symbol_is_pounds_without_a_warning():
+    page = filing_page(("25 Jul 2026", "AA", "Group of companies' accounts made up to 28 February 2026", True, False))
+    res, _ = run(company(N, filings=page, pdf=fixture("scanned_annual_report.pdf", "rb")))
+    assert res.status == "VERIFY" and res.currency == "GBP" and "currency" not in res.note

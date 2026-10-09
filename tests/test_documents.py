@@ -13,7 +13,7 @@ from conftest import fixture, needs_ocr
     ("ixbrl_group_consolidated.html", 30_035_247, 26_242_640, "iXBRL tagged figure"),   # Consolidated dimension
     ("ixbrl_thousands_row.html", 12_764_297, None, "iXBRL tagged figure"),
     ("ixbrl_untagged_table.html", 10_491_000, None, "iXBRL table (untagged)"),
-    ("ixbrl_stray_m.html", 5_983_804, None, "iXBRL table (untagged)"),                  # not £5.98 trillion
+    ("ixbrl_stray_m.html", 5_983_804, 7_790_881, "iXBRL table (untagged)"),             # not £5.98 trillion
 ])
 def test_real_ixbrl_filings(name, current, prior, method):
     got = t.read_ixbrl(fixture(name, "rb"))
