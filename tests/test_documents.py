@@ -122,7 +122,7 @@ def test_missing_ocr_engine_is_reported_not_raised(monkeypatch):
         raise t.OcrUnavailable("no module named onnxruntime")
     monkeypatch.setattr(t, "ocr_engine", unavailable)
     got = t.read_pdf(fixture("scanned_annual_report.pdf", "rb"))
-    assert got.turnover is None and "isn't installed" in got.problem
+    assert got.turnover is None and "isn't working" in got.problem
 
 
 @needs_ocr
@@ -130,3 +130,21 @@ def test_progress_messages_are_sent():
     seen = []
     t.read_pdf(fixture("scanned_annual_report.pdf", "rb"), progress=seen.append)
     assert seen and "page 1 of 3" in seen[0]
+
+
+def test_reader_that_cant_start_is_reported_and_logged(monkeypatch, capsys):
+    import builtins
+    real_import = builtins.__import__
+
+    def broken(name, *a, **k):
+        if name == "rapidocr_onnxruntime":
+            raise ImportError("libGL.so.1: cannot open shared object file")
+        return real_import(name, *a, **k)
+
+    monkeypatch.setattr(t, "_ocr", None)
+    monkeypatch.setattr(t, "_ocr_problem", None)
+    monkeypatch.setattr(builtins, "__import__", broken)
+    assert t.ocr_available() is False
+    assert "libGL.so.1" in capsys.readouterr().err                       # the reason is in the logs
+    got = t.read_pdf(fixture("scanned_annual_report.pdf", "rb"))
+    assert got.turnover is None and "isn't working" in got.problem

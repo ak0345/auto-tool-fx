@@ -167,8 +167,10 @@ to the website's blocking.
 2. Go to [share.streamlit.io](https://share.streamlit.io), sign in with GitHub, click
    **Create app**, pick the repository, and set the main file to `app.py`.
 3. Under **Advanced settings**, choose **Python 3.12**. The scanned-PDF reader needs 3.12 or
-   earlier. On a newer Python the app still works, but scanned PDFs are marked CHECK PDF and the
-   sidebar says so.
+   earlier, plus two Linux libraries that `packages.txt` installs (keep that file in the repo).
+   If the reader can't start, the app still works, but scanned PDFs are marked CHECK PDF, the
+   sidebar says so, and the reason is in the app's logs (Manage app). The Python version can
+   only be chosen when deploying: to change it, delete the app and deploy it again.
 4. Deploy and share the link. Each person who opens it gets their own private session: uploads
    and results are never stored or shared.
 
@@ -198,7 +200,7 @@ accounts and text PDFs.
 
 ```bash
 pip install -r requirements.txt -r requirements-dev.txt
-python -m pytest                          # 235 offline tests, about 30 seconds
+python -m pytest                          # 236 offline tests, about 30 seconds
 RUN_LIVE=1 python -m pytest tests/test_live.py -v    # 10 checks against the real site, about 8 minutes
 ```
 
@@ -215,6 +217,7 @@ the web app itself.
 | `turnover.py` | Finding companies, filings and turnover; writing the Excel results |
 | `inputs.py` | Reading uploaded spreadsheets and guessing the columns |
 | `run_queue.py` | The queue that shares the app between users |
+| `packages.txt` | Linux libraries Streamlit Cloud installs for the scanned-PDF reader |
 | `default_keywords.txt` | The keyword list the app starts with, one per line |
 | `sample_companies.xlsx` | A sample list (company name and number): 10 real companies, mostly importers, exporters and travel firms with foreign exchange exposure, plus two domestic businesses and a micro company for contrast |
 | `tests/` | The test suite and its fixtures |

@@ -685,20 +685,38 @@ class OcrUnavailable(Exception):
     pass
 
 
+_ocr_problem = None
+_ocr_start = threading.Lock()
+
+
 def ocr_available():
-    """Whether scanned PDFs can be read here (the OCR package only installs on Python <= 3.12)."""
-    import importlib.util
-    return importlib.util.find_spec("rapidocr_onnxruntime") is not None
+    """Whether scanned PDFs can be read here: the OCR package is installed and actually starts.
+    (It only installs on Python 3.12 or earlier, and on Linux it needs the system libraries in
+    packages.txt.)"""
+    try:
+        ocr_engine()
+        return True
+    except OcrUnavailable:
+        return False
 
 
 def ocr_engine():
-    global _ocr
+    """The OCR reader, started once and shared. If it can't start, the reason goes to the log
+    (Manage app > logs on Streamlit Cloud) and every later call fails fast with it."""
+    global _ocr, _ocr_problem
     if _ocr is None:
-        try:
-            from rapidocr_onnxruntime import RapidOCR
-            _ocr = RapidOCR()
-        except Exception as e:                  # missing package or model on the host
-            raise OcrUnavailable(str(e)) from e
+        with _ocr_start:
+            if _ocr is None:
+                if _ocr_problem:
+                    raise OcrUnavailable(_ocr_problem)
+                try:
+                    from rapidocr_onnxruntime import RapidOCR
+                    _ocr = RapidOCR()
+                except Exception as e:          # missing package, model or system library
+                    _ocr_problem = f"{type(e).__name__}: {e}"
+                    print(f"Scanned-PDF reader couldn't start: {_ocr_problem}", file=sys.stderr)
+                    traceback.print_exc(file=sys.stderr)
+                    raise OcrUnavailable(_ocr_problem) from e
     return _ocr
 
 
@@ -867,7 +885,7 @@ def read_pdf(data, max_pages=None, progress=None, read_scanned=True, keywords=No
                     rows = ocr_rows(image)
                 method = "PDF scan (OCR)"
             except OcrUnavailable:
-                out.problem = ("this is a scanned PDF and the scanned-PDF reader isn't installed on this "
+                out.problem = ("this is a scanned PDF and the scanned-PDF reader isn't working on this "
                                "server, open the PDF to check")
                 return out
             finally:

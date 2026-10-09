@@ -194,8 +194,9 @@ with st.sidebar:
                                  disabled=not read_scanned,
                                  help="Most minutes spent reading each company's accounts. Set to 0 for no limit")
     if read_scanned and not turnover.ocr_available():
-        st.warning("The scanned-PDF reader isn't installed on this server (it needs Python 3.12 or "
-                   "earlier), so scanned PDFs will be marked CHECK PDF. Everything else works.")
+        st.warning("The scanned-PDF reader isn't working on this server, so scanned PDFs will be marked "
+                   "CHECK PDF. Everything else works. It needs Python 3.12 and the packages.txt file; "
+                   "the app's logs give the reason.")
     st.divider()
     st.subheader("What the results mean")
     st.markdown('<div class="legend">' + "".join(
