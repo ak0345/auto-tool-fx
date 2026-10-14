@@ -8,6 +8,7 @@ Deploy:        see README.md
 
 import io
 import re
+import time
 from pathlib import Path
 
 import pandas as pd
@@ -187,12 +188,12 @@ with st.sidebar:
     read_scanned = st.toggle("Read scanned PDFs", value=True,
                              help="Reads scanned PDFs with OCR to find the turnover. When off these rows are marked CHECK PDF")
     ocr_keywords = st.toggle("Search scanned PDFs for keywords", value=True, disabled=not read_scanned,
-                             help="Reads every page of scanned PDFs to find keywords. Takes about 3 seconds per page")
+                             help="Reads every page of scanned PDFs to find keywords. Slow, often 10 seconds or more per page")
     max_pages = st.slider("Max pages per PDF (0 = no limit)", 0, 500, 0, step=10, disabled=not read_scanned,
                           help="Most pages read from each PDF. Set to 0 to read every page")
-    time_limit = st.number_input("Time limit per company (minutes)", min_value=0, max_value=240, value=0, step=1,
+    time_limit = st.number_input("Time limit per company (minutes)", min_value=0, max_value=240, value=5, step=1,
                                  disabled=not read_scanned,
-                                 help="Most minutes spent reading each company's accounts. Set to 0 for no limit")
+                                 help="Most minutes spent reading each company's accounts, so one big scanned PDF can't hold up the list. Set to 0 for no limit")
     if read_scanned and not turnover.ocr_available():
         st.warning("The scanned-PDF reader isn't working on this server, so scanned PDFs will be marked "
                    "CHECK PDF. Everything else works. It needs Python 3.12 and the packages.txt file; "
@@ -267,7 +268,7 @@ slow_keywords = bool(keywords) and read_scanned and ocr_keywords
 st.caption(f"{n_rows} companies{f', searching for {len(keywords)} keywords' if keywords else ''}. "
            f"Expect about {minutes} minute{'s' if minutes != 1 else ''}"
            + ((f", plus up to {time_limit} minute{'s' if time_limit != 1 else ''} for each large company with a "
-               "scanned annual report (the time limit you set)." if time_limit
+               "scanned annual report (the time limit in the sidebar)." if time_limit
                else ", plus 5-15 minutes for each large company with a scanned annual report, because every page "
                "is read to search for the keywords (turn this off, or set a time limit, in the sidebar)."
                if slow_keywords
@@ -323,12 +324,19 @@ if st.button("Find turnover", type="primary", width="stretch", disabled=n_rows =
                 c["_with_keywords"] = c.get("_with_keywords", 0) + 1
         return c
 
+    started = [time.monotonic()]                      # when the current company was started
+
+    def on_detail(msg):
+        mins = int((time.monotonic() - started[0]) // 60)
+        activity.caption(f"⏳ {msg}" + (f" · {mins} min on this company" if mins else ""))
+
     def on_row(done, total, name, res):
         bar.progress(min(done / max(total, 1), 1.0), text=f"Checked {done} of {total}")
         seen.append(table_row(name, res))
         table.dataframe(results_frame(seen[-12:]), hide_index=True, width="stretch",
                         column_config=TABLE_COLUMNS)
         activity.empty()
+        started[0] = time.monotonic()
         if done % 5 == 0 and done < total:
             save(done)                                   # partial results survive an interruption
             # Downloading these doesn't rerun the app, so the run carries on.
@@ -341,7 +349,7 @@ if st.button("Find turnover", type="primary", width="stretch", disabled=n_rows =
         turnover.process_sheet(ws_values, cols, out_ws, time_limit=time_limit, max_pages=max_pages or None,
                                on_row=on_row, header_row=header_row, read_scanned=read_scanned,
                                keywords=keywords or None, ocr_keywords=ocr_keywords,
-                               on_detail=lambda msg: activity.caption(f"⏳ {msg}"))
+                               on_detail=on_detail)
     finally:
         QUEUE.leave(ticket)                          # finished, stopped or left: next in line goes
     save(len(seen), final=True)

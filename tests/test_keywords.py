@@ -259,14 +259,21 @@ def test_no_time_limit_and_no_page_limit_by_default():
 
 
 @needs_ocr
-def test_time_limit_stops_reading_and_says_so(monkeypatch):
-    monkeypatch.setattr(t.time, "monotonic", FakeClock())        # limit hit after 2 pages
+def test_time_limit_stops_keywords_but_still_finds_the_turnover(monkeypatch):
+    monkeypatch.setattr(t.time, "monotonic", FakeClock())        # keyword time up after 1 page
     res = run(company("01234567", filings=SCANNED, pdf=fixture("scanned_annual_report.pdf", "rb")),
               keywords=["joint ventures", "hedging"], time_limit=1)
+    assert res.turnover == 1_234_500_000                          # the figures got the same time again
+    assert "keywords searched in 1 of 3 pages (1-minute time limit)" in res.note
+
+
+@needs_ocr
+def test_time_limit_without_keywords_stops_reading_and_says_so(monkeypatch):
+    monkeypatch.setattr(t.time, "monotonic", FakeClock())
+    res = run(company("01234567", filings=SCANNED, pdf=fixture("scanned_annual_report.pdf", "rb")),
+              time_limit=0.5)
     assert res.status == "CHECK PDF" and res.turnover is None
-    assert "stopped at the 1-minute time limit after 2 of 3 pages" in res.note
-    assert "keywords searched in 2 of 3 pages (1-minute time limit)" in res.note
-    assert res.keywords_found == ["joint ventures"]               # what was read still counts
+    assert "stopped at the 0.5-minute time limit after" in res.note
 
 
 @needs_ocr

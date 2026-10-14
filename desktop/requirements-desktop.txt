@@ -1,0 +1,4 @@
+# Extra pieces for building the desktop app (on top of requirements.txt).
+pyinstaller>=6.10
+# OpenCV 5 isn't handled by the app packager yet; the scanned-PDF reader works with 4.x.
+opencv-python<5

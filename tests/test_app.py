@@ -101,15 +101,17 @@ def test_clearing_the_box_skips_the_search(fake_ch):
 
 def test_long_keyword_search_is_warned_about():
     at = upload(start(), "clients.csv", b"Company Number\n445790\n")
+    [n for n in at.number_input if "Time limit" in n.label][0].set_value(0).run()
     assert any("every page is read to search for the keywords" in c.value for c in at.caption)
     at.toggle[1].set_value(False).run()                          # keyword search of scanned PDFs off
     assert not any("every page is read" in c.value for c in at.caption)
 
 
-def test_time_limit_box_defaults_to_no_limit_and_shows_in_estimate():
+def test_time_limit_box_defaults_to_five_minutes_and_shows_in_estimate():
     at = upload(start(), "clients.csv", b"Company Number\n445790\n")
     box = [n for n in at.number_input if "Time limit" in n.label][0]
-    assert box.value == 0
+    assert box.value == 5                     # one big scanned PDF can't hold up the whole list
+    assert any("up to 5 minutes for each large company" in c.value for c in at.caption)
     box.set_value(10).run()
     assert any("up to 10 minutes for each large company" in c.value for c in at.caption)
 

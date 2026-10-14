@@ -835,17 +835,22 @@ def read_pdf(data, max_pages=None, progress=None, read_scanned=True, keywords=No
         return out
     order = page_order(out.pages)[:max_pages]
     since_turnover = 0
+    keywords_on = keywords is not None
+    # When time runs out the keyword search stops, and the figures get the same time again.
+    extra = max(deadline - time.monotonic(), 0) if deadline is not None and keywords_on else None
     for done, i in enumerate(order, 1):
-        want_keywords = keywords is not None             # counts need every page, so never stop early
         need_turnover = out.turnover is None
         need_balance = out.cash is None or out.debtors is None
+        if deadline is not None and time.monotonic() > deadline:
+            out.timed_out = True
+            if not (keywords_on and extra is not None and (need_turnover or need_balance)):
+                break
+            keywords_on, deadline = False, time.monotonic() + extra
+        want_keywords = keywords_on                      # counts need every page, so never stop early
         if not need_turnover:
             since_turnover += 1
         if not want_keywords and not need_turnover and (
                 not need_balance or since_turnover > BALANCE_PAGES_AFTER_TURNOVER):
-            break
-        if deadline is not None and time.monotonic() > deadline:
-            out.timed_out = True
             break
         out.pages_checked = done
         try:

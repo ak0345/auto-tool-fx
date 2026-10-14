@@ -1,0 +1,77 @@
+# Builds the desktop app for Windows and Mac.
+# Every push to main: download the zips from the run's "Artifacts" section (Actions tab).
+# Push a tag like v1.0: the zips are also attached to a GitHub Release for staff to download.
+name: Desktop app
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            zip: Automation-Tool-Windows.zip
+          - os: macos-latest
+            zip: Automation-Tool-Mac.zip
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt -r desktop/requirements-desktop.txt
+      - name: Build
+        run: pyinstaller desktop/automation_tool.spec --noconfirm
+      - name: Check the scanned-PDF reader works in the build (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $p = Start-Process "dist/Automation Tool/Automation Tool.exe" -ArgumentList "--selftest" -Wait -PassThru
+          if ($p.ExitCode -ne 0) { throw "selftest failed" }
+      - name: Check the scanned-PDF reader works in the build (Mac)
+        if: runner.os == 'macOS'
+        run: '"dist/Automation Tool.app/Contents/MacOS/Automation Tool" --selftest'
+      - name: Check the app starts (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $p = Start-Process "dist/Automation Tool/Automation Tool.exe" -ArgumentList "--serve","8599" -PassThru
+          $ok = $false
+          for ($i = 0; $i -lt 90; $i++) { try { Invoke-WebRequest http://localhost:8599/_stcore/health -UseBasicParsing | Out-Null; $ok = $true; break } catch { Start-Sleep 2 } }
+          Stop-Process -Id $p.Id -Force
+          if (-not $ok) { throw "app didn't start" }
+      - name: Check the app starts (Mac)
+        if: runner.os == 'macOS'
+        run: |
+          "dist/Automation Tool.app/Contents/MacOS/Automation Tool" --serve 8599 &
+          for i in $(seq 1 90); do curl -sf localhost:8599/_stcore/health && break; sleep 2; done
+          curl -sf localhost:8599/_stcore/health
+          kill %1
+      - name: Zip (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: Compress-Archive -Path "dist/Automation Tool" -DestinationPath "${{ matrix.zip }}"
+      - name: Zip (Mac)
+        if: runner.os == 'macOS'
+        run: cd dist && ditto -c -k --keepParent "Automation Tool.app" "../${{ matrix.zip }}"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.zip }}
+          path: ${{ matrix.zip }}
+      - name: Attach to the release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: ${{ matrix.zip }}

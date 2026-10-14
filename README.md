@@ -80,8 +80,9 @@ no document to search (for example a new company with no accounts yet).
 - In scanned PDFs, OCR sometimes runs words together ("Foreignexchangerisk"). For that text
   only, phrases and longer words are also matched with the spaces ignored.
 - Electronic accounts and text PDFs are searched in full at no extra cost. Scanned PDFs have to
-  be read page by page with OCR (about 3 seconds a page), which is what makes big annual reports
-  slow. Every page is read so the counts are complete, unless a page or time limit is set. The
+  be read page by page with OCR (about 3 seconds a page on a laptop, 15 seconds to well over a
+  minute on the hosted app when it's busy), which is what makes big annual reports slow. Pages
+  are read until the time limit per company (5 minutes by default) runs out. The
   sidebar switch **Search scanned PDFs for keywords** turns this off; those companies are then
   noted as not searched.
 - The default list lives in `default_keywords.txt`, one keyword per line, so it can be changed
@@ -119,9 +120,13 @@ Companies House allows about one request a second. Measured on a laptop, October
 The 10-company sample file takes under a minute, keywords included. 100 typical small companies take about 8
 minutes. On free hosting, scanned reports take roughly twice as long.
 
-By default there are no limits: every page of every PDF is read. Sidebar settings to go faster:
+By default each company gets 5 minutes of PDF reading, so one big scanned report can't hold up a
+long list (on the hosted app a single 30-page scanned report could otherwise take 40 minutes or
+more). Sidebar settings:
 
-- **Time limit per company (minutes)**, 0 = no limit. Stops reading a PDF when the time is up.
+- **Time limit per company (minutes)**, 5 by default, 0 = no limit. When the time is up the
+  keyword search stops, and the turnover, cash and debtors search carries on for the same time
+  again before giving up; the Notes column says how many pages were searched.
 - **Max pages per PDF**, 0 = no limit. Reads at most that many pages (starting a quarter of the
   way in, where the financial statements usually are).
 - **Search scanned PDFs for keywords** off: scanned reports are only read until the turnover is
@@ -160,6 +165,42 @@ shared between everyone running at the time. A list of 10 small companies takes 
 on its own, and longer when others are running too. For regular large lists, the official
 Companies House API (a free key, 600 requests per 5 minutes) would be faster and isn't subject
 to the website's blocking.
+
+## Desktop app (recommended for staff)
+
+The same tool as a normal program: no Python, no setup, and it uses the computer's own power, so
+scanned reports are read in about 2-3 seconds a page instead of over a minute on free hosting.
+Each person's runs only use their own computer, so there's no queue.
+
+**Installing (staff)**
+
+- **Windows:** download `Automation-Tool-Windows.zip`, right-click it, choose **Extract All**, open
+  the folder and double-click **Automation Tool.exe**. The first time, Windows may say it
+  "protected your PC": click **More info**, then **Run anyway**.
+- **Mac:** download `Automation-Tool-Mac.zip`, double-click it, and drag **Automation Tool** into
+  Applications. The first time, macOS may say it can't check the app: open **System Settings >
+  Privacy & Security**, scroll down and click **Open Anyway**.
+
+A small Automation Tool window opens and the tool opens in the browser. Use it as normal; results
+download to the Downloads folder. Close the small window when finished. (Those first-time warnings
+go away if the app is code-signed, which needs a Microsoft or Apple developer certificate.)
+
+**Building it**
+
+GitHub builds both versions (`.github/workflows/desktop.yml`) on every push to main: the zips are
+under the run's Artifacts on the Actions tab. Pushing a tag such as `v1.0` also attaches them to a
+GitHub Release, which gives staff one download page. To build on your own machine (Python 3.12 or
+earlier):
+
+```
+pip install -r requirements.txt -r desktop/requirements-desktop.txt
+pyinstaller desktop/automation_tool.spec --noconfirm
+```
+
+The result is in `dist/`. `desktop/launcher.py` is the small window; it starts the app on a local
+port that other computers can't reach, and the app stops when the window closes.
+`"Automation Tool" --selftest` checks a build can read scanned PDFs. If the app won't start, the
+reason is in `automation_tool.log` in the system temp folder.
 
 ## Hosting it (free)
 
