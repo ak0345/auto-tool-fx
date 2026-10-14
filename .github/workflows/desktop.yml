@@ -20,8 +20,10 @@ jobs:
         include:
           - os: windows-latest
             zip: Automation-Tool-Windows.zip
-          - os: macos-latest
+          - os: macos-latest            # Apple Silicon (M1 and later)
             zip: Automation-Tool-Mac.zip
+          - os: macos-15-intel          # Intel Macs
+            zip: Automation-Tool-Mac-Intel.zip
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4

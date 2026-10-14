@@ -177,7 +177,9 @@ Each person's runs only use their own computer, so there's no queue.
 - **Windows:** download `Automation-Tool-Windows.zip`, right-click it, choose **Extract All**, open
   the folder and double-click **Automation Tool.exe**. The first time, Windows may say it
   "protected your PC": click **More info**, then **Run anyway**.
-- **Mac:** download `Automation-Tool-Mac.zip`, double-click it, and drag **Automation Tool** into
+- **Mac:** check the chip first: Apple menu > **About This Mac**. If it says **Chip: Apple M…**,
+  download `Automation-Tool-Mac.zip`; if it says **Processor: … Intel**, download
+  `Automation-Tool-Mac-Intel.zip`. Double-click it, and drag **Automation Tool** into
   Applications. The first time, macOS may say it can't check the app: open **System Settings >
   Privacy & Security**, scroll down and click **Open Anyway**.
 
